@@ -1,0 +1,7 @@
+; $Id$
+name= Image crop preview
+description = Add preview resolution option to imagefield_crop widget
+core = 7.x
+version = 7.x-2.x-dev
+dependencies[] = imagefield_crop (>=2.x)
+files[] = imagefield_crop_preview.module

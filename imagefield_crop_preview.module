@@ -1,0 +1,126 @@
+<?php
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ */
+function imagefield_crop_preview_form_field_ui_field_edit_form_alter(&$form, &$form_state) {
+  $widget = $form_state['build_info']['args'][0]['widget'];
+  if(isset($widget['settings']['preview_resolution'])) {
+    $resolution = explode('x', $widget['settings']['preview_resolution']) + array('', '');
+  }
+  else {
+    $resolution = array('', '');
+  }
+  if($widget['type'] == "imagefield_crop_widget") {
+    $form['instance']['widget']['settings']['resolution']['#description'] = t('The output resolution of the cropped image, expressed as WIDTHxHEIGHT (e.g. 640x480). Leave blank to skip rescale after cropping.');
+    $form['instance']['widget']['settings']['preview_resolution'] = array(
+      '#title' => t('The preview resolution'),
+      '#element_validate' => array('_image_field_resolution_validate'),
+      '#theme_wrappers' => array('form_element'),
+      '#description' => t('The preview resolution of the cropped image, expressed as WIDTHxHEIGHT (e.g. 640x480). Note: used output resolution as preview resolution when this field is empty.'),
+      '#weight' => 1,
+    );
+    $form['instance']['widget']['settings']['preview_resolution']['x'] = array(
+      '#type' => 'textfield',
+      '#default_value' => $resolution[0],
+      '#size' => 5,
+      '#maxlength' => 5,
+      '#field_suffix' => ' x ',
+      '#theme_wrappers' => array(),
+    );
+    $form['instance']['widget']['settings']['preview_resolution']['y'] = array(
+      '#type' => 'textfield',
+      '#default_value' => $resolution[1],
+      '#size' => 5,
+      '#maxlength' => 5,
+      '#field_suffix' => ' ' . t('pixels'),
+      '#theme_wrappers' => array(),
+    );
+    foreach(array('gif_processing', 'preview_image_style', 'validate_resolution') as $key) {
+      $form['instance']['widget']['settings'][$key]['#weight'] = 2;
+    }
+    foreach(array('file_extensions', 'default_image') as $key) {
+      $form['instance']['settings'][$key]['#weight'] = 2;
+    }
+  }
+}
+
+/**
+ * Implements hook_field_widget_form_alter().
+ */
+function imagefield_crop_preview_field_widget_form_alter(&$element, &$form_state, $context) {
+  if ($context['field']['type'] == 'imagefield_crop') {
+    foreach (element_children($element) as $key => $value) {
+      $element[$key]['#process'][] = 'imagefield_crop_preview_imagefield_crop_widget_process';
+    }
+  }
+}
+
+/**
+ * An element #process callback for the imagefield_crop field type.
+ */
+function imagefield_crop_preview_imagefield_crop_widget_process($element, &$form_state, $form) {
+  if ($element['#file']) {
+    $instance = field_info_instance($element['#entity_type'], $element['#field_name'],  $element['#bundle']);
+    $widget_settings = $instance['widget']['settings'];
+    if (isset($widget_settings['preview_resolution']) && !empty($widget_settings['preview_resolution'])) {
+      if(!isset($element['preview'])) {
+        $file_to_crop = _imagefield_crop_file_to_crop($element['#file']->fid);
+        $element['preview'] = array(
+          '#type' => 'markup',
+          '#file' => $file_to_crop, // This is used by the #process function
+          '#theme' => 'imagefield_crop_preview',
+          '#markup' => theme('image', array(
+            'path' => $element['#file']->uri,
+            'getsize' => FALSE,
+            'attributes' => array('class' => 'preview-existing'))
+          ),
+        );
+      }
+      $element['preview']['#process'] = array('imagefield_crop_preview_imagefield_crop_widget_preview_process');
+    }
+  }
+
+  return $element;
+}
+
+/**
+ * Process preview for imagefield_crop.
+ */
+function imagefield_crop_preview_imagefield_crop_widget_preview_process($element, &$form_state, $form) {
+  $file = $element['#file'];
+  if ($file->fid == 0) {
+    return $element;
+  }
+  // The widget belongs to the parent, so we got to find it first
+  $parents = array_slice($element['#array_parents'], 0, -1);
+  $parent = drupal_array_get_nested_value($form, $parents);
+  $instance = field_widget_instance($parent, $form_state);
+  list($width, $height) = (isset($instance['widget']['settings']['preview_resolution']) && !empty($instance['widget']['settings']['preview_resolution']))
+    ? explode('x', $instance['widget']['settings']['preview_resolution']) : array(0, 0);
+
+  $image_info = image_get_info(drupal_realpath($file->uri));
+  $settings = array(
+    $parent['#id'] => array(
+      'preview' => array(
+        'orig_width' => $image_info['width'],
+        'orig_height' => $image_info['height'],
+        'width' => (integer)$width,
+        'height' => (integer)$height,
+      ),
+    ),
+  );
+
+  $element['#attached']['js'][] = array(
+    'data' => array('imagefield_crop' => $settings),
+    'type' => 'setting',
+    'scope' => 'header',
+  );
+  $element['#imagefield_crop'] = array(
+    '#file' => $element['#file'],
+    '#width' => $width,
+    '#height' => $height,
+    '#path' => file_create_url($file->uri),
+  );
+  return $element;
+}
